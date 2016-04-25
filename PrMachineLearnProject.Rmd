@@ -1,0 +1,96 @@
+## Practical Machine Learning Course Project
+#### by Evgeniya Egupova
+#### 03/25/2016
+
+### Synopsis
+In this project, we will look at the data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The goal of the project is to predict the manner in which they did the exercise. The prediction model will be used to predict 20 different test cases. Possible methods include:
+
+- A: exactly according to the specification 
+- B: throwing the elbows to the front
+- C: lifting the dumbbell only halfway 
+- D: lowering the dumbbell only halfway
+- E: throwing the hips to the front
+
+Data source: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har)
+
+### Data Pre-processing
+
+```{r}
+## Loading raw data
+urltrain <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(urltrain, destfile = "pml-training.csv")
+dataTrain <- read.csv("pml-training.csv")
+urltest <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(urltest, destfile = "pml-testing.csv")
+dataTest <- read.csv("pml-testing.csv")
+dim(dataTrain)
+```
+The training data set consists of total 19,622 observations of 160 variables. First, We will split the data set into training and validation sets with 70% and 30% data split respectively.
+```{r, message = FALSE, warnings = FALSE}
+library(caret)
+set.seed(12321)
+inTrain <- createDataPartition(dataTrain$classe,p = 0.7,list = FALSE)
+trainSet <- dataTrain[inTrain,]
+validSet <- dataTrain[-inTrain,]
+```
+
+If we look closely at the summary of the data set, we can notice that some variables contain more than 90% of NA or blank values. Such variables include those that start with _kurtosis_, _skewness_, _max_, _min_, _amplitude_, _var_, _avg_, and _stddev_, as well as variable _cvtd_timestamp_. They cannot be imputed due to few records and  will not make significant contribution to the model, therefore we will remove them from the set.
+```{r}
+colIndex <- grep("^kurtosis|^skewness|^max_|^min_|^amplitude|^var_|^avg_|^stddev_|^cvtd_timestamp",colnames(trainSet))
+trainSet <- trainSet[,-colIndex]
+validSet <- validSet[,-colIndex]
+```
+Now, we will remove variables with near zero variance as they are not expected to have substantial meaning as predictors.
+```{r}
+nzv <- nearZeroVar(trainSet)
+trainSet <- trainSet[,-nzv]
+validSet <- validSet[,-nzv]
+```
+Finally, we do not expect indices, usernames, or any of the timestamp variables to serve as meaningful predictors, thus we exclude them from the set.
+```{r}
+colIndex1 <- grep("^[Xx]$|^user|timestamp",colnames(trainSet))
+trainSet <- trainSet[,-colIndex1]
+validSet <- validSet[,-colIndex1]
+```
+Final raw set contains the predicted variable _classe_ and 53 potential predictor variables.
+
+### Model Selection
+
+For purposes of this analysis we will evaluate random forest and gradient boosting models because they are considered the most accurate ones. In order to avoid over-fitting we will use 10-fold cross-validation with 3 repeats.
+```{r, message = FALSE, warnings = FALSE}
+fitControl <- trainControl(method = "cv", number = 10)
+## train the random forest model
+set.seed(12321)
+rfFit <- train(classe ~ ., data = trainSet, method = "rf", trControl = fitControl)
+## train the gradient boosting model
+set.seed(12321)
+gbmFit <- train(classe ~ ., data = trainSet, method = "gbm", trControl = fitControl, verbose = FALSE)
+```
+
+The two models are now compared using the _resamples_ function.
+```{r}
+results <- resamples(list(RF = rfFit, GBM = gbmFit))
+bwplot(results)
+dotplot (results)
+```
+
+Box and dot plots indicate that random forest model has higher accuracy and kappa values. It also has a narrower spread than the gradient boost model. Therefore, we choose the random forest model for further analysis.
+```{r}
+rfFit$finalModel
+```
+Final model includes 500 trees and uses 27 variables at each split. Out-of-sample error is expected to be 0.23%.
+
+### Model Validation
+The selected model is validated with the help of the 30% set that was partitioned from the test data at the beginning of this analysis. We use _confusion matrix_ to evaluate model performance.
+```{r}
+validPreds <- predict(rfFit, newdata = validSet)
+confusionMatrix(validSet$classe, validPreds)
+```
+According to the matrix the model performs with 99.9% accuracy and kappa value of 0.9987.
+
+### Test Data Predictions
+Finally, the random forrest model is used to predict 20 _classe_ values for the test data set.
+```{r}
+predictions <- predict(rfFit, newdata = dataTest)
+print(as.data.frame(predictions))
+```
